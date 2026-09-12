@@ -1,6 +1,8 @@
 from fastapi import FastAPI
+from sqlalchemy import text
 
 from app.core.config import settings
+from app.core.database import engine
 
 
 app = FastAPI(
@@ -38,4 +40,17 @@ def developer():
         "name": "Shiva",
         "role": "AI Engineer",
         "project": settings.app_name
+    }
+
+
+@app.get("/health/database")
+def database_health():
+    with engine.connect() as connection:
+        result = connection.execute(text("SELECT 1"))
+        value = result.scalar()
+
+    return {
+        "database": "PostgreSQL",
+        "status": "Connected",
+        "test_result": value
     }
