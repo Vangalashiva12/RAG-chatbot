@@ -2,7 +2,9 @@ from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.core.config import settings
-from app.core.database import engine
+from app.core.database import create_tables, engine
+
+create_tables()
 
 
 app = FastAPI(
