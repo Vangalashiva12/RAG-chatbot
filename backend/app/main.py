@@ -3,6 +3,7 @@ from sqlalchemy import text
 
 from app.core.config import settings
 from app.core.database import create_tables, engine
+from app.api.auth import router as auth_router
 
 create_tables()
 
@@ -13,6 +14,7 @@ app = FastAPI(
     debug=settings.debug
 )
 
+app.include_router(auth_router)
 
 @app.get("/")
 def home():
