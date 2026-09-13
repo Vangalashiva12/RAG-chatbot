@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from fastapi.security import OAuth2PasswordRequestForm
+from app.core.permissions import require_admin
 
 from app.core.database import get_db
 from app.core.security import (
@@ -103,5 +104,42 @@ def get_me(
         "id": user.id,
         "email": user.email,
         "full_name": user.full_name,
-        "is_active": user.is_active
+        "is_active": user.is_active,
+        "role": user.role
+    }
+
+@router.get("/admin-test")
+def admin_test(
+    user: User = Depends(require_admin)
+):
+    return {
+        "message": "Welcome Admin!",
+        "user_id": user.id,
+        "email": user.email,
+        "role": user.role
+    }
+
+@router.patch("/make-admin/{user_id}")
+def make_admin(
+    user_id: int,
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    user = db.query(User).filter(User.id == user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    user.role = "ADMIN"
+    db.commit()
+    db.refresh(user)
+
+    return {
+        "message": "User promoted to admin",
+        "user_id": user.id,
+        "email": user.email,
+        "role": user.role
     }

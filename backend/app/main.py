@@ -1,5 +1,8 @@
 from fastapi import FastAPI
 from sqlalchemy import text
+from app.api.documents import router as documents_router
+
+
 
 from app.core.config import settings
 from app.core.database import create_tables, engine
@@ -15,6 +18,8 @@ app = FastAPI(
 )
 
 app.include_router(auth_router)
+app.include_router(auth_router)
+app.include_router(documents_router)
 
 @app.get("/")
 def home():
