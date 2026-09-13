@@ -1,0 +1,13 @@
+Enterprise RAG Chatbot Test Document
+
+This is a test document for our Enterprise RAG Chatbot.
+
+The chatbot will eventually use this document for:
+- Text extraction
+- Chunking
+- Embeddings
+- Vector search
+- Retrieval-Augmented Generation
+
+FastAPI is being used as the backend API.
+PostgreSQL is being used as the relational database.
