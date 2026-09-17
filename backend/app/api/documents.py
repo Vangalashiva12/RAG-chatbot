@@ -3,11 +3,16 @@ import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
+from sqlalchemy import delete
 
 from app.core.database import get_db
 from app.core.permissions import require_admin
 from app.models.document import Document
 from app.models.user import User
+from app.services.document_processor import extract_text_from_file
+
+from app.services.chunker import split_text
+from app.models.document_chunk import DocumentChunk
 
 
 router = APIRouter(
@@ -98,3 +103,108 @@ async def upload_document(
         "file_size": document.file_size,
         "status": document.status
     }
+
+@router.post("/{document_id}/process")
+def process_document(
+    document_id: int,
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    document = (
+        db.query(Document)
+        .filter(Document.id == document_id)
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    try:
+        # Step 1: Mark document as processing
+        document.status = "PROCESSING"
+        db.commit()
+
+        # Step 2: Extract text
+        extracted_text = extract_text_from_file(
+            document.file_path,
+            document.file_type
+        )
+
+        if not extracted_text.strip():
+            document.status = "FAILED"
+            db.commit()
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No text could be extracted from the document"
+            )
+
+        # Step 3: Store extracted text
+        document.extracted_text = extracted_text
+
+        # Step 4: Split text into chunks
+        chunks = split_text(
+            extracted_text,
+            chunk_size=1000,
+            chunk_overlap=200
+        )
+
+        if not chunks:
+            document.status = "FAILED"
+            db.commit()
+
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No chunks could be created from the document"
+            )
+
+        # Remove existing chunks if document is being reprocessed
+        db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == document.id
+        ).delete(
+            synchronize_session=False
+        )
+
+
+        # Step 5: Save chunks
+        for index, chunk in enumerate(chunks):
+            document_chunk = DocumentChunk(
+                document_id=document.id,
+                chunk_index=index,
+                content=chunk,
+                character_count=len(chunk)
+            )
+
+            db.add(document_chunk)
+
+        # Step 6: Update document status
+        document.status = "CHUNKED"
+
+        db.commit()
+        db.refresh(document)
+
+        return {
+            "message": "Document processed and chunked successfully",
+            "document_id": document.id,
+            "filename": document.filename,
+            "status": document.status,
+            "characters_extracted": len(extracted_text),
+            "chunks_created": len(chunks)
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        document.status = "FAILED"
+        db.commit()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Document processing failed: {str(error)}"
+        )

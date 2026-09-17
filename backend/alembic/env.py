@@ -7,6 +7,7 @@ from app.core.config import settings
 from app.models.base import Base
 from app.models.user import User
 from app.models.document import Document
+from app.models.document_chunk import DocumentChunk
 
 
 config = context.config
