@@ -10,10 +10,10 @@ from app.core.permissions import require_admin
 from app.models.document import Document
 from app.models.user import User
 from app.services.document_processor import extract_text_from_file
-
+from app.services.embedding_service import embedding_service
 from app.services.chunker import split_text
 from app.models.document_chunk import DocumentChunk
-
+from app.services.search_service import semantic_search
 
 router = APIRouter(
     prefix="/documents",
@@ -103,6 +103,58 @@ async def upload_document(
         "file_size": document.file_size,
         "status": document.status
     }
+
+
+
+@router.get("/search")
+def search_documents(
+    query: str,
+    top_k: int = 5,
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    if not query.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Search query cannot be empty"
+        )
+
+    if top_k < 1 or top_k > 20:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="top_k must be between 1 and 20"
+        )
+
+    try:
+        results = semantic_search(
+            query=query,
+            db=db,
+            top_k=top_k
+        )
+
+        return {
+            "query": query,
+            "results": [
+                {
+                    "chunk_id": chunk.id,
+                    "document_id": chunk.document_id,
+                    "chunk_index": chunk.chunk_index,
+                    "content": chunk.content,
+                    "character_count": chunk.character_count
+                }
+                for chunk in results
+            ]
+        }
+
+    except Exception as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Search failed: {str(error)}"
+        )
+
+
+
+
 
 @router.post("/{document_id}/process")
 def process_document(
@@ -208,3 +260,62 @@ def process_document(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Document processing failed: {str(error)}"
         )
+
+
+@router.post("/{document_id}/embed")
+def embed_document(
+    document_id: int,
+    current_admin: User = Depends(require_admin),
+    db: Session = Depends(get_db)
+):
+    document = (
+        db.query(Document)
+        .filter(Document.id == document_id)
+        .first()
+    )
+
+    if not document:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found"
+        )
+
+    chunks = (
+        db.query(DocumentChunk)
+        .filter(DocumentChunk.document_id == document.id)
+        .order_by(DocumentChunk.chunk_index)
+        .all()
+    )
+
+    if not chunks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No chunks found for this document"
+        )
+
+    try:
+        texts = [chunk.content for chunk in chunks]
+
+        embeddings = embedding_service.generate_embeddings(texts)
+
+        for chunk, embedding in zip(chunks, embeddings):
+            chunk.embedding = embedding
+
+        db.commit()
+
+        return {
+            "message": "Embeddings generated successfully",
+            "document_id": document.id,
+            "chunks_embedded": len(embeddings),
+            "embedding_dimension": len(embeddings[0])
+        }
+
+    except Exception as error:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Embedding generation failed: {str(error)}"
+        )
+
+
