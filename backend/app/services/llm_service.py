@@ -1,12 +1,16 @@
-from google import genai
+import time
+
+import boto3
+from botocore.exceptions import ClientError
 
 from app.core.config import settings
 
 
-class GeminiService:
+class BedrockService:
     def __init__(self):
-        self.client = genai.Client(
-            api_key=settings.gemini_api_key
+        self.client = boto3.client(
+            "bedrock-runtime",
+            region_name=settings.aws_region
         )
 
     def generate_answer(
@@ -36,12 +40,44 @@ Question:
 Answer:
 """
 
-        response = self.client.models.generate_content(
-            model=settings.gemini_model,
-            contents=prompt
-        )
+        max_retries = 3
 
-        return response.text
+        for attempt in range(max_retries):
+            try:
+                response = self.client.converse(
+                    modelId=settings.bedrock_model_id,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "text": prompt
+                                }
+                            ]
+                        }
+                    ],
+                    inferenceConfig={
+                        "maxTokens": 500,
+                        "temperature": 0.2
+                    }
+                )
+
+                return response["output"]["message"]["content"][0]["text"]
+
+            except ClientError as error:
+                if attempt == max_retries - 1:
+                    raise error
+
+                wait_time = 2 ** attempt
+
+                print(
+                    f"Bedrock temporarily unavailable. "
+                    f"Retrying in {wait_time} seconds..."
+                )
+
+                time.sleep(wait_time)
+
+        raise RuntimeError("Bedrock request failed after retries")
 
 
-gemini_service = GeminiService()
+bedrock_service = BedrockService()
