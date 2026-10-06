@@ -1,6 +1,6 @@
 from sqlalchemy import Boolean, String
 from sqlalchemy.orm import Mapped, mapped_column
-
+from sqlalchemy.orm import relationship
 from app.models.base import Base
 
 
@@ -39,4 +39,10 @@ class User(Base):
         String(50),
         default="USER",
         nullable=False
+    )
+
+    conversations = relationship(
+        "Conversation",
+        back_populates="user",
+        cascade="all, delete-orphan"
     )

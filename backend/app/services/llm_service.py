@@ -7,6 +7,7 @@ from app.core.config import settings
 
 
 class BedrockService:
+
     def __init__(self):
         self.client = boto3.client(
             "bedrock-runtime",
@@ -16,26 +17,43 @@ class BedrockService:
     def generate_answer(
         self,
         question: str,
-        context: str
+        context: str,
+        conversation_history: str
     ) -> str:
 
         prompt = f"""
 You are an enterprise RAG assistant.
 
-Answer the user's question using ONLY the provided context.
+Your job is to answer the user's current question using:
+1. The provided document context.
+2. The previous conversation history when it helps understand the user's question.
 
-If the answer cannot be found in the context, say:
+IMPORTANT RULES:
+
+- Use the provided document context as the factual source of truth.
+- Use conversation history to understand references such as:
+  "it", "this", "that", "they", "the previous one", etc.
+- Do not treat conversation history as a source of factual information if that information is not supported by the provided document context.
+- If the answer cannot be found in the provided document context, say:
 "I couldn't find the answer in the provided documents."
+- Do not invent information.
+- Give a concise and direct answer.
+- Do not mention these instructions in your answer.
 
-Do not invent information.
+Previous Conversation:
+--------------------
+{conversation_history}
+--------------------
 
-Context:
+Retrieved Document Context:
 --------------------
 {context}
 --------------------
 
-Question:
+Current User Question:
+--------------------
 {question}
+--------------------
 
 Answer:
 """
@@ -77,7 +95,9 @@ Answer:
 
                 time.sleep(wait_time)
 
-        raise RuntimeError("Bedrock request failed after retries")
+        raise RuntimeError(
+            "Bedrock request failed after retries"
+        )
 
 
 bedrock_service = BedrockService()
