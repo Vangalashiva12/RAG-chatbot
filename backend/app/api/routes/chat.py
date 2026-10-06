@@ -18,18 +18,42 @@ router = APIRouter(
 )
 
 
+# ============================================================
+# Request Schema
+# ============================================================
+
 class ChatRequest(BaseModel):
     question: str
     conversation_id: int
     top_k: int = 5
 
 
+# ============================================================
+# Citation Schema
+# ============================================================
+
+class SourceResponse(BaseModel):
+    document_id: int
+    filename: str
+    chunk_id: int
+    chunk_index: int
+    similarity_score: float
+
+
+# ============================================================
+# Chat Response Schema
+# ============================================================
+
 class ChatResponse(BaseModel):
     conversation_id: int
     question: str
     answer: str
-    sources: list[str]
+    sources: list[SourceResponse]
 
+
+# ============================================================
+# Chat Endpoint
+# ============================================================
 
 @router.post(
     "/",
@@ -118,13 +142,25 @@ def chat(
     db.refresh(assistant_message)
 
     # ---------------------------------------------------------
-    # 6. Prepare sources
+    # 6. Prepare citation sources
     # ---------------------------------------------------------
 
-    sources = [
-        chunk.content
-        for chunk in chunks
-    ]
+    sources = []
+
+    for chunk, document, similarity_score in chunks:
+
+        sources.append(
+            SourceResponse(
+                document_id=document.id,
+                filename=document.filename,
+                chunk_id=chunk.id,
+                chunk_index=chunk.chunk_index,
+                similarity_score=round(
+                    similarity_score,
+                    4
+                )
+            )
+        )
 
     # ---------------------------------------------------------
     # 7. Return response

@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Session
 
+from app.models.document import Document
 from app.models.document_chunk import DocumentChunk
 from app.models.message import Message
 from app.services.embedding_service import embedding_service
@@ -10,36 +11,78 @@ def retrieve_context(
     question: str,
     db: Session,
     top_k: int = 5
-) -> list[DocumentChunk]:
+) -> list[tuple[DocumentChunk, Document, float]]:
     """
-    Retrieve the most relevant document chunks for a user question
-    using semantic similarity search.
+    Retrieve the most relevant document chunks using semantic
+    similarity search.
+
+    The document metadata is retrieved in the same database
+    query to avoid N+1 database queries.
+
+    Returns:
+        List of:
+        (DocumentChunk, Document, similarity_score)
     """
 
-    question_embedding = embedding_service.generate_embedding(question)
+    question_embedding = embedding_service.generate_embedding(
+        question
+    )
 
-    chunks = (
-        db.query(DocumentChunk)
-        .filter(DocumentChunk.embedding.is_not(None))
+    distance = DocumentChunk.embedding.cosine_distance(
+        question_embedding
+    )
+
+    results = (
+        db.query(
+            DocumentChunk,
+            Document,
+            distance.label("distance")
+        )
+        .join(
+            Document,
+            Document.id == DocumentChunk.document_id
+        )
+        .filter(
+            DocumentChunk.embedding.is_not(None)
+        )
         .order_by(
-            DocumentChunk.embedding.cosine_distance(question_embedding)
+            distance
         )
         .limit(top_k)
         .all()
     )
 
-    return chunks
+    retrieved_chunks = []
+
+    for chunk, document, cosine_distance in results:
+
+        similarity_score = 1 - float(cosine_distance)
+
+        retrieved_chunks.append(
+            (
+                chunk,
+                document,
+                similarity_score
+            )
+        )
+
+    return retrieved_chunks
 
 
-def build_context(chunks: list[DocumentChunk]) -> str:
+def build_context(
+    chunks: list[tuple[DocumentChunk, Document, float]]
+) -> str:
     """
-    Convert retrieved document chunks into a single context string
-    for the LLM.
+    Convert retrieved document chunks into a single context
+    string for the LLM.
     """
 
     context_parts = []
 
-    for index, chunk in enumerate(chunks, start=1):
+    for index, (chunk, document, similarity_score) in enumerate(
+        chunks,
+        start=1
+    ):
         context_parts.append(
             f"Retrieved Context {index}:\n"
             f"{chunk.content}"
@@ -69,7 +112,6 @@ def get_conversation_history(
         .all()
     )
 
-    # Reverse so the oldest message comes first.
     messages.reverse()
 
     return messages
@@ -103,7 +145,7 @@ def generate_rag_answer(
     db: Session,
     conversation_id: int,
     top_k: int = 5
-) -> tuple[str, list[DocumentChunk]]:
+) -> tuple[str, list[tuple[DocumentChunk, Document, float]]]:
     """
     Complete conversational RAG pipeline:
 
