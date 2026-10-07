@@ -33,6 +33,13 @@ class Document(Base):
         nullable=False
     )
 
+    file_hash: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
     uploaded_by: Mapped[int] = mapped_column(
         ForeignKey("users.id"),
         nullable=False
