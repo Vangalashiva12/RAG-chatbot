@@ -5,6 +5,7 @@ from app.models.document_chunk import DocumentChunk
 from app.models.message import Message
 from app.services.embedding_service import embedding_service
 from app.services.llm_service import bedrock_service
+from app.services.reranker_service import reranker_service
 
 
 def retrieve_context(
@@ -12,21 +13,14 @@ def retrieve_context(
     db: Session,
     top_k: int = 5
 ) -> list[tuple[DocumentChunk, Document, float]]:
-    """
-    Retrieve the most relevant document chunks using semantic
-    similarity search.
 
-    The document metadata is retrieved in the same database
-    query to avoid N+1 database queries.
-
-    Returns:
-        List of:
-        (DocumentChunk, Document, similarity_score)
-    """
-
+    # Generate question embedding
     question_embedding = embedding_service.generate_embedding(
         question
     )
+
+    # Retrieve more candidates than we ultimately need
+    candidate_k = max(top_k * 4, 20)
 
     distance = DocumentChunk.embedding.cosine_distance(
         question_embedding
@@ -45,44 +39,51 @@ def retrieve_context(
         .filter(
             DocumentChunk.embedding.is_not(None)
         )
-        .order_by(
-            distance
-        )
-        .limit(top_k)
+        .order_by(distance)
+        .limit(candidate_k)
         .all()
     )
 
-    retrieved_chunks = []
+    if not results:
+        return []
+
+    candidate_chunks = []
 
     for chunk, document, cosine_distance in results:
 
-        similarity_score = 1 - float(cosine_distance)
+        vector_similarity = (
+            1 - float(cosine_distance)
+        )
 
-        retrieved_chunks.append(
+        candidate_chunks.append(
             (
                 chunk,
                 document,
-                similarity_score
+                vector_similarity
             )
         )
 
-    return retrieved_chunks
+    # Rerank the vector-search candidates
+    reranked_chunks = reranker_service.rerank(
+        question=question,
+        chunks=candidate_chunks,
+        top_k=top_k
+    )
 
+    return reranked_chunks
 
 def build_context(
     chunks: list[tuple[DocumentChunk, Document, float]]
 ) -> str:
-    """
-    Convert retrieved document chunks into a single context
-    string for the LLM.
-    """
 
     context_parts = []
 
-    for index, (chunk, document, similarity_score) in enumerate(
-        chunks,
-        start=1
-    ):
+    for index, (
+        chunk,
+        document,
+        similarity_score
+    ) in enumerate(chunks, start=1):
+
         context_parts.append(
             f"Retrieved Context {index}:\n"
             f"{chunk.content}"
@@ -96,9 +97,6 @@ def get_conversation_history(
     db: Session,
     limit: int = 10
 ) -> list[Message]:
-    """
-    Retrieve recent messages from a conversation.
-    """
 
     messages = (
         db.query(Message)
@@ -120,10 +118,6 @@ def get_conversation_history(
 def build_conversation_history(
     messages: list[Message]
 ) -> str:
-    """
-    Convert conversation messages into text that can be
-    provided to the LLM.
-    """
 
     if not messages:
         return "No previous conversation history."
@@ -131,6 +125,7 @@ def build_conversation_history(
     history_parts = []
 
     for message in messages:
+
         role = message.role.capitalize()
 
         history_parts.append(
@@ -145,16 +140,14 @@ def generate_rag_answer(
     db: Session,
     conversation_id: int,
     top_k: int = 5
-) -> tuple[str, list[tuple[DocumentChunk, Document, float]]]:
-    """
-    Complete conversational RAG pipeline:
+) -> tuple[
+    str,
+    list[tuple[DocumentChunk, Document, float]]
+]:
 
-    1. Retrieve conversation history
-    2. Retrieve relevant document chunks
-    3. Build document context
-    4. Build conversation history
-    5. Generate an answer using Bedrock
-    """
+    # ---------------------------------------------------------
+    # Retrieve + rerank relevant chunks
+    # ---------------------------------------------------------
 
     chunks = retrieve_context(
         question=question,
@@ -163,12 +156,24 @@ def generate_rag_answer(
     )
 
     if not chunks:
+
         return (
-            "I couldn't find relevant information in the provided documents.",
+            "I couldn't find relevant information "
+            "in the provided documents.",
             []
         )
 
-    context = build_context(chunks)
+    # ---------------------------------------------------------
+    # Build document context
+    # ---------------------------------------------------------
+
+    context = build_context(
+        chunks
+    )
+
+    # ---------------------------------------------------------
+    # Get conversation history
+    # ---------------------------------------------------------
 
     messages = get_conversation_history(
         conversation_id=conversation_id,
@@ -178,6 +183,10 @@ def generate_rag_answer(
     conversation_history = build_conversation_history(
         messages
     )
+
+    # ---------------------------------------------------------
+    # Generate answer
+    # ---------------------------------------------------------
 
     answer = bedrock_service.generate_answer(
         question=question,

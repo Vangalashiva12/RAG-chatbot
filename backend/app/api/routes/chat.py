@@ -37,7 +37,7 @@ class SourceResponse(BaseModel):
     filename: str
     chunk_id: int
     chunk_index: int
-    similarity_score: float
+    rerank_score: float
 
 
 # ============================================================
@@ -147,18 +147,14 @@ def chat(
 
     sources = []
 
-    for chunk, document, similarity_score in chunks:
-
+    for chunk, document, rerank_score in chunks:
         sources.append(
             SourceResponse(
                 document_id=document.id,
                 filename=document.filename,
                 chunk_id=chunk.id,
                 chunk_index=chunk.chunk_index,
-                similarity_score=round(
-                    similarity_score,
-                    4
-                )
+                rerank_score=round(rerank_score, 4)
             )
         )
 
