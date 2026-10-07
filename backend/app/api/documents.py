@@ -2,7 +2,15 @@ import hashlib
 import os
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+    status
+)
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -15,6 +23,7 @@ from app.services.chunker import split_text
 from app.services.document_processor import extract_text_from_file
 from app.services.embedding_service import embedding_service
 from app.services.search_service import semantic_search
+from app.services.document_ingestion_services import ingest_document
 
 
 router = APIRouter(
@@ -78,6 +87,7 @@ class DocumentDetailResponse(BaseModel):
     status_code=status.HTTP_201_CREATED
 )
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     current_admin: User = Depends(require_admin),
     db: Session = Depends(get_db)
@@ -214,6 +224,12 @@ async def upload_document(
     db.add(document)
     db.commit()
     db.refresh(document)
+
+    background_tasks.add_task(
+        ingest_document,
+        document.id
+    )
+
 
     # --------------------------------------------------------
     # 12. Return response
