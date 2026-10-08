@@ -99,6 +99,32 @@ Answer:
             "Bedrock request failed after retries"
         )
 
+    def generate_simple_answer(
+            self,
+            prompt: str
+    ) -> str:
+
+        response = self.client.converse(
+            modelId=settings.bedrock_model_id,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "text": prompt
+                        }
+                    ]
+                }
+            ],
+            inferenceConfig={
+                "maxTokens": 100,
+                "temperature": 0.0
+            }
+        )
+
+        answer = response["output"]["message"]["content"][0]["text"]
+
+        return answer.strip()
     def generate_answer_stream(
         self,
         question: str,

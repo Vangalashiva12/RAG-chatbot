@@ -6,6 +6,7 @@ from app.models.message import Message
 from app.services.embedding_service import embedding_service
 from app.services.llm_service import bedrock_service
 from app.services.reranker_service import reranker_service
+from app.services.query_rewrite_service import query_rewrite_service
 from app.services.hybrid_search_service import hybrid_search_service
 
 
@@ -70,21 +71,26 @@ def rerank_chunks(
 def retrieve_hybrid_context(
     question: str,
     db: Session,
-    top_k: int = 5
+    top_k: int = 5,
+    conversation_history: str = ""
 ) -> list[tuple[DocumentChunk, Document, float]]:
 
-    hybrid_candidates = hybrid_search_service.search(
+    search_query = query_rewrite_service.rewrite_query(
         question=question,
+        conversation_history=conversation_history
+    )
+
+    hybrid_candidates = hybrid_search_service.search(
+        question=search_query,
         db=db,
         top_k=max(top_k * 4, 20)
     )
 
     return rerank_chunks(
-        question=question,
+        question=search_query,
         chunks=hybrid_candidates,
         top_k=top_k
     )
-
 
 def build_context(chunks):
     context_parts = []
@@ -145,10 +151,20 @@ def generate_rag_answer(
     conversation_id: int,
     top_k: int = 5
 ):
+    messages = get_conversation_history(
+        conversation_id=conversation_id,
+        db=db
+    )
+
+    conversation_history = build_conversation_history(
+        messages
+    )
+
     chunks = retrieve_hybrid_context(
         question=question,
         db=db,
-        top_k=top_k
+        top_k=top_k,
+        conversation_history=conversation_history
     )
 
     if not chunks:
@@ -158,15 +174,6 @@ def generate_rag_answer(
         )
 
     context = build_context(chunks)
-
-    messages = get_conversation_history(
-        conversation_id=conversation_id,
-        db=db
-    )
-
-    conversation_history = build_conversation_history(
-        messages
-    )
 
     answer = bedrock_service.generate_answer(
         question=question,

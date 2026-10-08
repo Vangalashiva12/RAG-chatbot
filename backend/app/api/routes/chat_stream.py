@@ -67,10 +67,22 @@ def chat_stream(
     db.commit()
     db.refresh(user_message)
 
+    # Get conversation history before retrieval
+    messages = get_conversation_history(
+        conversation_id=conversation.id,
+        db=db
+    )
+
+    conversation_history = build_conversation_history(
+        messages
+    )
+
+    # Query rewriting is performed inside retrieve_hybrid_context()
     chunks = retrieve_hybrid_context(
         question=request.question,
         db=db,
-        top_k=request.top_k
+        top_k=request.top_k,
+        conversation_history=conversation_history
     )
 
     if not chunks:
@@ -88,7 +100,9 @@ def chat_stream(
 
         db.add(assistant_message)
 
-        conversation.updated_at = datetime.now(timezone.utc)
+        conversation.updated_at = datetime.now(
+            timezone.utc
+        )
 
         db.commit()
 
@@ -119,15 +133,6 @@ def chat_stream(
         )
 
     context = build_context(chunks)
-
-    messages = get_conversation_history(
-        conversation_id=conversation.id,
-        db=db
-    )
-
-    conversation_history = build_conversation_history(
-        messages
-    )
 
     def generate():
         full_answer = ""
