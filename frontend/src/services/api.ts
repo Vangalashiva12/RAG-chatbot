@@ -1,11 +1,6 @@
 
 const API_BASE_URL = 'http://localhost:8000'
 
-export interface LoginResponse {
-  access_token: string
-  token_type: string
-}
-
 export interface User {
   id?: number
   email?: string
@@ -14,60 +9,92 @@ export interface User {
   [key: string]: unknown
 }
 
-async function readError(response: Response): Promise<string> {
-  const body = await response.text()
-
-  try {
-    const parsed = JSON.parse(body)
-    return parsed.detail ?? `Request failed (${response.status})`
-  } catch {
-    return body || `Request failed (${response.status})`
-  }
+export interface Conversation {
+  id: number
+  title: string
 }
 
-export async function login(
-  email: string,
-  password: string,
-): Promise<LoginResponse> {
+export interface ConversationMessage {
+  id: number
+  role: string
+  content: string
+}
+
+export interface ConversationDetail {
+  id: number
+  title: string
+  messages: ConversationMessage[]
+}
+
+export interface ChatSource {
+  [key: string]: unknown
+}
+
+export interface Document {
+  id: number
+  filename: string
+  file_type: string
+  file_size: number
+  uploaded_by: number
+  status: string
+}
+
+export interface DocumentDetail extends Document {
+  extracted_text: string | null
+  chunk_count: number
+}
+
+export interface DocumentUploadResponse {
+  message: string
+  document_id: number
+  filename: string
+  file_type: string
+  file_size: number
+  status: string
+}
+
+export interface DocumentProcessResponse {
+  message: string
+  document_id: number
+  filename: string
+  status: string
+  characters_extracted: number
+  chunks_created: number
+}
+
+export interface DocumentEmbedResponse {
+  message: string
+  document_id: number
+  chunks_embedded: number
+  embedding_dimension: number
+}
+
+export async function login(email: string, password: string) {
   const formData = new URLSearchParams()
-  formData.set('username', email)
-  formData.set('password', password)
+  formData.append('username', email)
+  formData.append('password', password)
 
   const response = await fetch(`${API_BASE_URL}/auth/login`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded',
     },
-    body: formData.toString(),
+    body: formData,
   })
 
   if (!response.ok) {
-    throw new Error(await readError(response))
+    const error = await response.json().catch(() => ({}))
+    throw new Error(error.detail || 'Login failed')
   }
 
-  const data = (await response.json()) as LoginResponse
-
-  if (!data.access_token) {
-    throw new Error('Login response did not contain an access token.')
-  }
-
-  return data
+  return response.json()
 }
 
 export async function getCurrentUser(
   accessToken: string,
 ): Promise<User> {
-  const response = await fetch(`${API_BASE_URL}/auth/me`, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-  })
-
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
-  return (await response.json()) as User
+  const response = await authenticatedFetch('/auth/me', accessToken)
+  return response.json()
 }
 
 export async function authenticatedFetch(
@@ -84,37 +111,32 @@ export async function authenticatedFetch(
   })
 
   if (!response.ok) {
-    throw new Error(await readError(response))
+    const error = await response.json().catch(() => ({}))
+    throw new Error(
+      error.detail || `Request failed (${response.status})`,
+    )
   }
 
   return response
-}
-
-
-export interface ChatSource {
-  [key: string]: unknown
-}
-
-export interface StreamCallbacks {
-  onToken: (token: string) => void
-  onSources: (sources: ChatSource[]) => void
-  onDone?: () => void
 }
 
 export async function streamChat(
   accessToken: string,
   question: string,
   conversationId: number,
-  callbacks: StreamCallbacks,
+  callbacks: {
+    onToken: (content: string) => void
+    onSources: (sources: ChatSource[]) => void
+    onDone: () => void
+    onError: (error: string) => void
+  },
   topK = 5,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/chat/stream`, {
+  const response = await authenticatedFetch('/chat/stream', accessToken, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
     },
     body: JSON.stringify({
       question,
@@ -124,12 +146,8 @@ export async function streamChat(
     signal,
   })
 
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
-
   if (!response.body) {
-    throw new Error('The server did not return a readable response stream.')
+    throw new Error('Streaming response body is unavailable')
   }
 
   const reader = response.body.getReader()
@@ -142,48 +160,31 @@ export async function streamChat(
       if (done) break
 
       buffer += decoder.decode(value, { stream: true })
-      buffer = buffer.replace(/\r\n/g, '\n')
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
 
-      let boundary = buffer.indexOf('\n\n')
+      for (const event of events) {
+        const dataLine = event
+          .split('\n')
+          .find((line) => line.startsWith('data:'))
 
-      while (boundary !== -1) {
-        const eventBlock = buffer.slice(0, boundary)
-        buffer = buffer.slice(boundary + 2)
+        if (!dataLine) continue
 
-        for (const line of eventBlock.split('\n')) {
-          if (!line.startsWith('data:')) continue
+        try {
+          const data = JSON.parse(dataLine.slice(5).trim())
 
-          const payload = line.slice(5).trim()
-          if (!payload) continue
-
-          let event: {
-            type?: string
-            content?: string
-            sources?: ChatSource[]
-            message?: string
-            detail?: string
+          if (data.type === 'token') {
+            callbacks.onToken(data.content || '')
+          } else if (data.type === 'sources') {
+            callbacks.onSources(data.sources || [])
+          } else if (data.type === 'done') {
+            callbacks.onDone()
+          } else if (data.type === 'error') {
+            callbacks.onError(data.message || 'Streaming failed')
           }
-
-          try {
-            event = JSON.parse(payload)
-          } catch {
-            throw new Error('Received an invalid streaming event from the server.')
-          }
-
-          if (event.type === 'token' && event.content) {
-            callbacks.onToken(event.content)
-          } else if (event.type === 'sources') {
-            callbacks.onSources(event.sources ?? [])
-          } else if (event.type === 'done') {
-            callbacks.onDone?.()
-          } else if (event.type === 'error') {
-            throw new Error(
-              event.message ?? event.detail ?? 'The server reported a chat error.',
-            )
-          }
+        } catch {
+          // Ignore malformed SSE event data.
         }
-
-        boundary = buffer.indexOf('\n\n')
       }
     }
   } finally {
@@ -191,42 +192,19 @@ export async function streamChat(
   }
 }
 
-
-export interface Conversation {
-  id: number
-  title: string
-}
-
 export async function createConversation(
   accessToken: string,
   title = 'New Conversation',
-): Promise<Conversation> {
-  const response = await authenticatedFetch(
-    '/conversations/',
-    accessToken,
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ title }),
+) {
+  const response = await authenticatedFetch('/conversations/', accessToken, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
     },
-  )
+    body: JSON.stringify({ title }),
+  })
 
-  return (await response.json()) as Conversation
-}
-
-
-export interface ConversationMessage {
-  id: number
-  role: string
-  content: string
-}
-
-export interface ConversationDetail {
-  id: number
-  title: string
-  messages: ConversationMessage[]
+  return response.json()
 }
 
 export async function getConversations(
@@ -236,8 +214,7 @@ export async function getConversations(
     '/conversations/',
     accessToken,
   )
-
-  return (await response.json()) as Conversation[]
+  return response.json()
 }
 
 export async function getConversation(
@@ -248,6 +225,83 @@ export async function getConversation(
     `/conversations/${conversationId}`,
     accessToken,
   )
+  return response.json()
+}
 
-  return (await response.json()) as ConversationDetail
+// ============================================================
+// Document Management API
+// ============================================================
+
+export async function getDocuments(
+  accessToken: string,
+): Promise<Document[]> {
+  const response = await authenticatedFetch('/documents/', accessToken)
+  return response.json()
+}
+
+export async function uploadDocument(
+  accessToken: string,
+  file: File,
+): Promise<DocumentUploadResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+
+  // Do not manually set Content-Type for FormData.
+  // The browser must generate the multipart boundary.
+  const response = await authenticatedFetch(
+    '/documents/upload',
+    accessToken,
+    {
+      method: 'POST',
+      body: formData,
+    },
+  )
+
+  return response.json()
+}
+
+export async function getDocument(
+  accessToken: string,
+  documentId: number,
+): Promise<DocumentDetail> {
+  const response = await authenticatedFetch(
+    `/documents/${documentId}`,
+    accessToken,
+  )
+  return response.json()
+}
+
+export async function processDocument(
+  accessToken: string,
+  documentId: number,
+): Promise<DocumentProcessResponse> {
+  const response = await authenticatedFetch(
+    `/documents/${documentId}/process`,
+    accessToken,
+    { method: 'POST' },
+  )
+  return response.json()
+}
+
+export async function embedDocument(
+  accessToken: string,
+  documentId: number,
+): Promise<DocumentEmbedResponse> {
+  const response = await authenticatedFetch(
+    `/documents/${documentId}/embed`,
+    accessToken,
+    { method: 'POST' },
+  )
+  return response.json()
+}
+
+export async function deleteDocument(
+  accessToken: string,
+  documentId: number,
+): Promise<void> {
+  await authenticatedFetch(
+    `/documents/${documentId}`,
+    accessToken,
+    { method: 'DELETE' },
+  )
 }
