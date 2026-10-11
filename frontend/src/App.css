@@ -723,3 +723,66 @@ button {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+
+.conversation-history-heading {
+  margin-top: 24px;
+  margin-bottom: 10px;
+}
+
+.conversation-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.conversation-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #666b80;
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-item:hover,
+.conversation-item.selected {
+  background: #f0eeff;
+  color: #6254e8;
+}
+
+.conversation-item:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.conversation-item-icon {
+  flex-shrink: 0;
+}
+
+.conversation-item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.history-status,
+.history-error {
+  padding: 8px;
+  color: #898da0;
+  font-size: 11px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.history-error {
+  color: #a52e36;
+}

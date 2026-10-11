@@ -215,3 +215,39 @@ export async function createConversation(
 
   return (await response.json()) as Conversation
 }
+
+
+export interface ConversationMessage {
+  id: number
+  role: string
+  content: string
+}
+
+export interface ConversationDetail {
+  id: number
+  title: string
+  messages: ConversationMessage[]
+}
+
+export async function getConversations(
+  accessToken: string,
+): Promise<Conversation[]> {
+  const response = await authenticatedFetch(
+    '/conversations/',
+    accessToken,
+  )
+
+  return (await response.json()) as Conversation[]
+}
+
+export async function getConversation(
+  accessToken: string,
+  conversationId: number,
+): Promise<ConversationDetail> {
+  const response = await authenticatedFetch(
+    `/conversations/${conversationId}`,
+    accessToken,
+  )
+
+  return (await response.json()) as ConversationDetail
+}

@@ -1,11 +1,13 @@
 
-import { useState } from 'react'
+import { useState, type FormEvent } from 'react'
 import './App.css'
 import {
   login,
   getCurrentUser,
   createConversation,
   streamChat,
+  getConversations,
+  getConversation,
   type User,
   type ChatSource,
   type Conversation,
@@ -29,11 +31,66 @@ function App() {
   const [question, setQuestion] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [conversation, setConversation] = useState<Conversation | null>(null)
+  const [conversations, setConversations] = useState<Conversation[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false)
+  const [historyError, setHistoryError] = useState('')
+
   const [isSending, setIsSending] = useState(false)
   const [chatError, setChatError] = useState('')
   const [activeSection, setActiveSection] = useState<'chat' | 'documents'>('chat')
 
-  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
+  async function loadConversations(token: string) {
+    setIsLoadingHistory(true)
+    setHistoryError('')
+
+    try {
+      const data = await getConversations(token)
+      setConversations(data)
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to load conversation history.',
+      )
+    } finally {
+      setIsLoadingHistory(false)
+    }
+  }
+
+  async function handleSelectConversation(conversationId: number) {
+    if (!accessToken || isSending) return
+
+    setChatError('')
+    setHistoryError('')
+    setActiveSection('chat')
+
+    try {
+      const data = await getConversation(accessToken, conversationId)
+
+      setConversation({
+        id: data.id,
+        title: data.title,
+      })
+
+      setMessages(
+        data.messages.map((message) => ({
+          id: message.id,
+          role: message.role === 'user' ? 'user' : 'assistant',
+          content: message.content,
+        })),
+      )
+
+      setQuestion('')
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to open this conversation.',
+      )
+    }
+  }
+
+  async function handleLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setLoginError('')
     setIsLoggingIn(true)
@@ -45,6 +102,8 @@ function App() {
       setAccessToken(result.access_token)
       setUser(currentUser)
       setPassword('')
+
+      await loadConversations(result.access_token)
     } catch (error) {
       setLoginError(
         error instanceof Error
@@ -64,6 +123,8 @@ function App() {
     setPassword('')
     setEmail('')
     setConversation(null)
+    setConversations([])
+    setHistoryError('')
     setChatError('')
     setActiveSection('chat')
   }
@@ -75,6 +136,7 @@ function App() {
 
     setQuestion('')
     setChatError('')
+    setHistoryError('')
     setIsSending(true)
 
     const userMessageId = Date.now()
@@ -109,6 +171,9 @@ function App() {
         )
 
         setConversation(activeConversation)
+
+        // Refresh the sidebar so the new conversation appears.
+        await loadConversations(accessToken)
       }
 
       await streamChat(
@@ -188,6 +253,7 @@ function App() {
     setQuestion('')
     setConversation(null)
     setChatError('')
+    setHistoryError('')
     setActiveSection('chat')
   }
 
@@ -290,6 +356,49 @@ function App() {
         >
           <span>▧</span> Documents
         </button>
+
+        <div className="sidebar-label conversation-history-heading">
+          RECENT CONVERSATIONS
+        </div>
+
+        <div className="conversation-history">
+          {isLoadingHistory && (
+            <div className="history-status">
+              Loading conversations...
+            </div>
+          )}
+
+          {historyError && (
+            <div className="history-error" role="alert">
+              {historyError}
+            </div>
+          )}
+
+          {!isLoadingHistory &&
+            !historyError &&
+            conversations.length === 0 && (
+              <div className="history-status">
+                No saved conversations yet.
+              </div>
+            )}
+
+          {conversations.map((item) => (
+            <button
+              key={item.id}
+              className={`conversation-item ${
+                conversation?.id === item.id ? 'selected' : ''
+              }`}
+              onClick={() => void handleSelectConversation(item.id)}
+              disabled={isSending}
+              title={item.title}
+            >
+              <span className="conversation-item-icon">▤</span>
+              <span className="conversation-item-title">
+                {item.title}
+              </span>
+            </button>
+          ))}
+        </div>
 
         <div className="sidebar-bottom">
           <div className="status-indicator" />
