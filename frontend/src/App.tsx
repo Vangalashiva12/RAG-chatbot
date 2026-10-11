@@ -1,4 +1,3 @@
-
 import { useEffect, useState, type FormEvent, type ChangeEvent } from 'react'
 import './App.css'
 import {
@@ -277,12 +276,16 @@ function App() {
                     source.document_id ??
                     'Source document'
 
-                  return String(filename)
+                  return String(filename).trim()
                 })
+
+                // Multiple retrieved chunks can come from the same file.
+                // Show each source document only once, preserving retrieval order.
+                const uniqueFilenames = [...new Set(filenames)].filter(Boolean)
 
                 return {
                   ...message,
-                  sources: filenames,
+                  sources: uniqueFilenames,
                 }
               }),
             )
