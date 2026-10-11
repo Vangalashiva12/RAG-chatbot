@@ -50,6 +50,21 @@ function getStatusClass(status: string): string {
   return 'document-status-default'
 }
 
+function getStatusLabel(status: string): string {
+  const normalized = status.toUpperCase()
+  const labels: Record<string, string> = {
+    UPLOADED: 'Uploaded · waiting to process',
+    PROCESSING: 'Processing…',
+    CHUNKED: 'Chunked · embeddings may be needed',
+    COMPLETED: 'Completed',
+    READY: 'Ready',
+    PROCESSED: 'Processed',
+    FAILED: 'Failed · retry available',
+  }
+
+  return labels[normalized] ?? status.replaceAll('_', ' ')
+}
+
 function App() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -531,6 +546,29 @@ function App() {
     // Load documents when the user opens the Documents section.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, activeSection])
+
+  // Poll while a document is waiting for or undergoing background ingestion.
+  // Stop polling automatically when all documents leave these states or the
+  // user navigates away from the Documents section.
+  const hasPendingIngestion = documents.some((document) => {
+    const status = document.status.toUpperCase()
+    return status === 'UPLOADED' || status === 'PROCESSING'
+  })
+
+  useEffect(() => {
+    if (!accessToken || activeSection !== 'documents' || !hasPendingIngestion) {
+      return
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadDocuments(accessToken)
+    }, 5000)
+
+    return () => window.clearInterval(intervalId)
+    // loadDocuments is a component-local helper; the poll should restart only
+    // when authentication, section, or pending-ingestion state changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, activeSection, hasPendingIngestion])
 
   if (!accessToken) {
     return (
@@ -1059,8 +1097,11 @@ function App() {
                             </td>
 
                             <td style={tableCellStyle}>
-                              <span className={getStatusClass(document.status)}>
-                                {document.status}
+                              <span
+                                className={getStatusClass(document.status)}
+                                title={`Backend status: ${document.status}`}
+                              >
+                                {getStatusLabel(document.status)}
                               </span>
                             </td>
 
@@ -1081,17 +1122,27 @@ function App() {
                                   Details
                                 </button>
 
-                                {normalizedStatus !== 'CHUNKED' &&
-                                  normalizedStatus !== 'PROCESSING' && (
+                                {(normalizedStatus === 'UPLOADED' ||
+                                  normalizedStatus === 'FAILED') && (
                                     <button
                                       type="button"
                                       onClick={() => void handleProcessDocument(document)}
                                       disabled={isBusy}
                                       style={smallButtonStyle}
                                     >
-                                      {isBusy ? 'Working...' : 'Process'}
+                                      {isBusy ? 'Working...' : normalizedStatus === 'FAILED' ? 'Retry processing' : 'Process'}
                                     </button>
                                   )}
+
+                                {normalizedStatus === 'PROCESSING' && (
+                                  <button
+                                    type="button"
+                                    disabled
+                                    style={{ ...smallButtonStyle, cursor: 'wait', opacity: 0.7 }}
+                                  >
+                                    Processing…
+                                  </button>
+                                )}
 
                                 {normalizedStatus === 'CHUNKED' && (
                                   <button
