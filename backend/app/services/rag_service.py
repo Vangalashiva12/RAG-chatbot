@@ -92,20 +92,21 @@ def retrieve_hybrid_context(
         top_k=top_k
     )
 
+
 def build_context(chunks):
     context_parts = []
 
     for index, (chunk, document, score) in enumerate(
         chunks,
-        start=1
+        start=1,
     ):
         context_parts.append(
-            f"Retrieved Context {index}:\n"
-            f"{chunk.content}"
+            f"Retrieved Context {index}\n"
+            f"Source Document: {document.filename}\n"
+            f"Content:\n{chunk.content}"
         )
 
     return "\n\n".join(context_parts)
-
 
 def get_conversation_history(
     conversation_id,

@@ -27,6 +27,13 @@ def contains_refusal(answer: str) -> bool:
     )
 
 
+def is_unanswerable(item: dict) -> bool:
+    if "relevant_documents" in item:
+        return not item["relevant_documents"]
+
+    return item.get("relevant_document") is None
+
+
 def evaluate_unanswerable_questions(
     dataset: list[dict],
     db: Session,
@@ -35,7 +42,7 @@ def evaluate_unanswerable_questions(
     results = []
 
     for item in dataset:
-        if item["relevant_document"] is not None:
+        if not is_unanswerable(item):
             continue
 
         question = item["question"]
@@ -62,14 +69,20 @@ def evaluate_unanswerable_questions(
             "question": question,
             "answer": answer,
             "refused": refused,
+            "context_found": bool(context.strip()),
         })
 
     total = len(results)
-    refusals = sum(result["refused"] for result in results)
+    correct_refusals = sum(
+        result["refused"] for result in results
+    )
 
     return {
         "total_questions": total,
-        "correct_refusals": refusals,
-        "refusal_rate": refusals / total if total else 0.0,
+        "correct_refusals": correct_refusals,
+        "unsupported_answers": total - correct_refusals,
+        "refusal_rate": (
+            correct_refusals / total if total else 0.0
+        ),
         "results": results,
     }

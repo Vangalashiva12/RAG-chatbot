@@ -567,13 +567,14 @@ def embed_document(
             )
         )
 
-        for chunk, embedding in zip(
-            chunks,
-            embeddings
-        ):
+        for chunk, embedding in zip(chunks, embeddings):
             chunk.embedding = embedding
 
+        # Mark the document as ready after embeddings are saved.
+        document.status = "COMPLETED"
+
         db.commit()
+        db.refresh(document)
 
         return {
             "message": (
